@@ -48,7 +48,6 @@ public class SmoothnessTestScript : MonoBehaviour
     int m_DiscretePositionCount;
     int m_DiscretePositionIndex;
     float m_CubeVelocity;
-    bool m_MovingLeft;
 
     void Awake()
     {
@@ -78,27 +77,18 @@ public class SmoothnessTestScript : MonoBehaviour
         if (m_FrameIndex < 10)
             return;
 
-        var deltaTimeMovement = m_CubeVelocity * Time.deltaTime;
-
-        if (m_MovingLeft)
+        m_DiscretePositionIndex++;
+        if (m_DiscretePositionIndex > m_DiscretePositionCount - 1)
         {
-            deltaTimeMovement = -deltaTimeMovement;
-
-            m_DiscretePositionIndex--;
-            if (m_DiscretePositionIndex < 0)
-                m_MovingLeft = false;
-        }
-        else
-        {
-            m_DiscretePositionIndex++;
-            if (m_DiscretePositionIndex >= m_DiscretePositionCount - 1)
-                m_MovingLeft = true;
+            Setup(currentResolution);
+            return;
         }
 
         var perfectMovementCubePosition = m_PerfectMovementCubeTransform.position;
         perfectMovementCubePosition.x = kMargin + m_DiscretePositionIndex * m_DiscreteRegionWidth + 1;
         m_PerfectMovementCubeTransform.position = perfectMovementCubePosition;
 
+        var deltaTimeMovement = m_CubeVelocity * Time.deltaTime;
         var deltaTimeCubePosition = m_DeltaTimeCubeTransform.position;
         deltaTimeCubePosition.x += deltaTimeMovement;
         m_DeltaTimeCubeTransform.position = deltaTimeCubePosition;
@@ -114,30 +104,13 @@ public class SmoothnessTestScript : MonoBehaviour
         if (m_FrameIndex < 10)
             return;
 
-        var position = cube.position;
         var velocity = cube.velocity;
-        var timeDiff = Time.fixedTime - m_LastUpdateTime;
+        if (velocity == Vector3.zero || velocity.x < 0)
+        {
+            var position = cube.position;
+            var timeDiff = Time.fixedTime - m_LastUpdateTime;
 
-        bool shouldResyncPosition = false;
-
-        if (velocity == Vector3.zero)
-        {
-            shouldResyncPosition = true;
-        }
-        else if (velocity.x < 0)
-        {
-            shouldResyncPosition = true;
-        }
-        else
-        {
-            var rightMargin = kMargin + m_DiscreteRegionWidth * m_DiscretePositionCount;
-            if (position.x >= rightMargin)
-                shouldResyncPosition = true;
-        }
-
-        if (shouldResyncPosition)
-        {
-            cube.velocity = velocity = new Vector3(m_MovingLeft ? -m_CubeVelocity : m_CubeVelocity, 0, 0);
+            cube.velocity = velocity = new Vector3(m_CubeVelocity, 0, 0);
             position.x = m_DeltaTimeCubeTransform.position.x + velocity.x * timeDiff;
             cube.MovePosition(position);
         }
@@ -155,7 +128,7 @@ public class SmoothnessTestScript : MonoBehaviour
 
         m_FrameIndex = 0;
         m_DiscretePositionCount = resolution.RefreshRate.Numerator / resolution.RefreshRate.Denominator + 1;
-        m_DiscretePositionIndex = Math.Min(m_DiscretePositionCount - 1, m_DiscretePositionIndex);
+        m_DiscretePositionIndex = 0;
         m_DiscreteRegionWidth = (resolution.Width - 2 * kMargin) / m_DiscretePositionCount;
 
         var integerRefreshRate = resolution.RefreshRate.Numerator / resolution.RefreshRate.Denominator;
@@ -190,13 +163,11 @@ public class SmoothnessTestScript : MonoBehaviour
         cubePosition.y = 11 * resolution.Height / 15;
         SetupCube(m_DeltaTimeCubeTransform, cubePosition, cubeScale, m_MovingSquareMaterial);
 
-        var fixedVelocity = Vector3.zero;
-
         m_FixedTimeCube = AllocUnitCubeWithRigidbody();
         m_FixedTimeCubeRigidBody = m_FixedTimeCube.GetComponent<Rigidbody>();
         m_FixedTimeCubeRigidBody.useGravity = false;
         m_FixedTimeCubeRigidBody.interpolation = RigidbodyInterpolation.Interpolate;
-        m_FixedTimeCubeRigidBody.velocity = fixedVelocity;
+        m_FixedTimeCubeRigidBody.velocity = Vector3.zero;
 
         cubePosition.y = 10 * resolution.Height / 15;
         SetupCube(m_FixedTimeCube.transform, cubePosition, cubeScale, m_MovingSquareMaterial);
