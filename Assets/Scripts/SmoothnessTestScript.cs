@@ -6,6 +6,8 @@ using UnityEngine;
 
 public class SmoothnessTestScript : MonoBehaviour
 {
+#pragma warning disable CS0649
+
     [SerializeField]
     Camera m_Camera;
 
@@ -20,6 +22,8 @@ public class SmoothnessTestScript : MonoBehaviour
 
     [SerializeField]
     Color m_MovingSquareColor;
+
+#pragma warning restore CS0649
 
     DisplayParameters m_Resolution;
 
@@ -39,14 +43,10 @@ public class SmoothnessTestScript : MonoBehaviour
     GameObject m_FixedTimeCube;
     Rigidbody m_FixedTimeCubeRigidBody;
 
-    const int kMargin = 100;
-
     int m_FrameIndex;
     float m_LastUpdateTime;
 
-    int m_DiscreteRegionWidth;
-    int m_DiscretePositionCount;
-    int m_DiscretePositionIndex;
+    int m_CubeWidth;
     float m_CubeVelocity;
 
     void Awake()
@@ -77,19 +77,25 @@ public class SmoothnessTestScript : MonoBehaviour
         if (m_FrameIndex < 10)
             return;
 
-        m_DiscretePositionIndex++;
-        if (m_DiscretePositionIndex > m_DiscretePositionCount - 1)
+        if (m_FrameIndex > 10000) // Don't let floating point precision get out of wack.
         {
             Setup(currentResolution);
             return;
         }
 
         var perfectMovementCubePosition = m_PerfectMovementCubeTransform.position;
-        perfectMovementCubePosition.x = kMargin + m_DiscretePositionIndex * m_DiscreteRegionWidth + 1;
+        var deltaTimeCubePosition = m_DeltaTimeCubeTransform.position;
+        if (Mathf.Abs(perfectMovementCubePosition.x - deltaTimeCubePosition.x) > 3 * m_CubeWidth / 4)
+        {
+            // DeltaTime cube is out of bounds of by more than 75% of the frame. We likely dropped a frame - resync them.
+            Setup(currentResolution);
+            return;
+        }
+
+        perfectMovementCubePosition.x += m_CubeWidth;
         m_PerfectMovementCubeTransform.position = perfectMovementCubePosition;
 
         var deltaTimeMovement = m_CubeVelocity * Time.deltaTime;
-        var deltaTimeCubePosition = m_DeltaTimeCubeTransform.position;
         deltaTimeCubePosition.x += deltaTimeMovement;
         m_DeltaTimeCubeTransform.position = deltaTimeCubePosition;
     }
@@ -105,7 +111,7 @@ public class SmoothnessTestScript : MonoBehaviour
             return;
 
         var velocity = cube.velocity;
-        if (velocity == Vector3.zero || velocity.x < 0)
+        if (velocity == Vector3.zero)
         {
             var position = cube.position;
             var timeDiff = Time.fixedTime - m_LastUpdateTime;
@@ -122,55 +128,61 @@ public class SmoothnessTestScript : MonoBehaviour
 
         m_Resolution = resolution;
 
-        m_Camera.orthographic = true;
-        m_Camera.orthographicSize = resolution.Height / 2.0f;
-        m_Camera.transform.position = new Vector3(resolution.Width / 2.0f, resolution.Height / 2.0f, -1);
-
         m_FrameIndex = 0;
-        m_DiscretePositionCount = resolution.RefreshRate.Numerator / resolution.RefreshRate.Denominator + 1;
-        m_DiscretePositionIndex = 0;
-        m_DiscreteRegionWidth = (resolution.Width - 2 * kMargin) / m_DiscretePositionCount;
+        m_CubeWidth = resolution.Height / 48;
 
-        var integerRefreshRate = resolution.RefreshRate.Numerator / resolution.RefreshRate.Denominator;
         var floatRefreshRate = (float)resolution.RefreshRate.Numerator / resolution.RefreshRate.Denominator;
-        m_CubeVelocity = floatRefreshRate * m_DiscreteRegionWidth * (m_DiscretePositionCount - 1) / integerRefreshRate;
+        m_CubeVelocity = floatRefreshRate * m_CubeWidth;
 
-        var linePositionX = kMargin;
-        var linePositionY = resolution.Height / 2.0f;
-        var lineCount = m_DiscretePositionCount + 1;
-        for (int i = 0; i < lineCount; i++)
-        {
-            var line = AllocUnitCube();
-            m_Lines.Add(line);
-
-            var position = new Vector3(linePositionX, linePositionY);
-            var scale = new Vector3(1.0f, -resolution.Height);
-            SetupCube(line.transform, position, scale, m_LineMaterial);
-
-            linePositionX += m_DiscreteRegionWidth;
-        }
-
-        var cubePosition = new Vector3(kMargin + m_DiscreteRegionWidth * m_DiscretePositionIndex + 1, 12 * resolution.Height / 15);
-        var cubeScale = new Vector3(m_DiscreteRegionWidth - 1, m_DiscreteRegionWidth - 1);
+        var cubePosition = new Vector3(resolution.Width / 2 - m_CubeWidth / 2, (resolution.Height - m_CubeWidth) / 2 + 2 * m_CubeWidth, 50.0f);
+        var cubeScale = new Vector3(m_CubeWidth, m_CubeWidth, 1.0f);
 
         m_PerfectMovementCube = AllocUnitCube();
+        m_PerfectMovementCube.name = "Perfect movement cube";
         m_PerfectMovementCubeTransform = m_PerfectMovementCube.transform;
         SetupCube(m_PerfectMovementCubeTransform, cubePosition, cubeScale, m_MovingSquareMaterial);
 
+        var lineScale = new Vector3(1.0f, resolution.Height, 1.0f);
+
+        var leftLine = AllocUnitCube();
+        leftLine.name = "Left line";
+        Vector3 linePosition = new Vector3(cubePosition.x - 1, 0.0f, cubePosition.z + 10.0f); // Behind the cube, so that if cube intersects it, it's clearly visible
+        SetupCube(leftLine.transform, linePosition, lineScale, m_LineMaterial);
+        leftLine.transform.parent = m_PerfectMovementCubeTransform;
+        m_Lines.Add(leftLine);
+
+        var rightLine = AllocUnitCube();
+        rightLine.name = "Right line";
+        linePosition.x = cubePosition.x + m_CubeWidth;
+        SetupCube(rightLine.transform, linePosition, lineScale, m_LineMaterial);
+        rightLine.transform.parent = m_PerfectMovementCubeTransform;
+        m_Lines.Add(rightLine);
+
         m_DeltaTimeCube = AllocUnitCube();
+        m_DeltaTimeCube.name = "Delta time cube";
         m_DeltaTimeCubeTransform = m_DeltaTimeCube.transform;
 
-        cubePosition.y = 11 * resolution.Height / 15;
+        cubePosition.y = (resolution.Height - m_CubeWidth) / 2;
         SetupCube(m_DeltaTimeCubeTransform, cubePosition, cubeScale, m_MovingSquareMaterial);
 
         m_FixedTimeCube = AllocUnitCubeWithRigidbody();
+        m_FixedTimeCube.name = "Fixed time cube";
         m_FixedTimeCubeRigidBody = m_FixedTimeCube.GetComponent<Rigidbody>();
         m_FixedTimeCubeRigidBody.useGravity = false;
         m_FixedTimeCubeRigidBody.interpolation = RigidbodyInterpolation.Interpolate;
         m_FixedTimeCubeRigidBody.velocity = Vector3.zero;
 
-        cubePosition.y = 10 * resolution.Height / 15;
+        cubePosition.y = (resolution.Height - m_CubeWidth) / 2 - 2 * m_CubeWidth;
         SetupCube(m_FixedTimeCube.transform, cubePosition, cubeScale, m_MovingSquareMaterial);
+
+        m_Camera.orthographic = true;
+        m_Camera.orthographicSize = resolution.Height / 2.0f;
+        m_Camera.nearClipPlane = 1.0f;
+        m_Camera.farClipPlane = 1000.0f;
+
+        var cameraTransform = m_Camera.transform;
+        cameraTransform.position = new Vector3(resolution.Width / 2.0f, resolution.Height / 2.0f, 0.0f);
+        cameraTransform.parent = m_PerfectMovementCubeTransform;
     }
 
     private static void SetupCube(Transform cubeTransform, Vector3 position, Vector3 scale, Material material)
@@ -243,12 +255,14 @@ public class SmoothnessTestScript : MonoBehaviour
 
     void ReleaseUnitCube(GameObject obj)
     {
+        obj.transform.parent = null;
         obj.SetActive(false);
         m_ObjectPool.Add(obj);
     }
 
     void ReleaseUnitCubeWithRigidBody(GameObject obj)
     {
+        obj.transform.parent = null;
         obj.SetActive(false);
         m_RigidbodyObjectPool.Add(obj);
     }
