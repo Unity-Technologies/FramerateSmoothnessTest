@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Unity.Collections;
 using UnityEngine;
 
 public class SmoothnessTestScript : MonoBehaviour
@@ -23,6 +24,9 @@ public class SmoothnessTestScript : MonoBehaviour
     [SerializeField]
     Color m_MovingSquareColor;
 
+    [SerializeField]
+    Color[] m_BackgroundCubeColors;
+
 #pragma warning restore CS0649
 
     DisplayParameters m_Resolution;
@@ -33,15 +37,16 @@ public class SmoothnessTestScript : MonoBehaviour
     List<GameObject> m_ObjectPool;
     List<GameObject> m_RigidbodyObjectPool;
 
-    List<GameObject> m_Lines;
-    GameObject m_PerfectMovementCube;
+    GameObject m_LeftLine;
+    GameObject m_RightLine;
+
+    Transform m_CameraTransform;
     Transform m_PerfectMovementCubeTransform;
-
-    GameObject m_DeltaTimeCube;
     Transform m_DeltaTimeCubeTransform;
-
-    GameObject m_FixedTimeCube;
     Rigidbody m_FixedTimeCubeRigidBody;
+
+    Transform[] m_BackgroundCubes;
+    Material[] m_BackgroundMaterials;
 
     int m_FrameIndex;
     float m_LastUpdateTime;
@@ -49,19 +54,31 @@ public class SmoothnessTestScript : MonoBehaviour
     int m_CubeWidth;
     float m_CubeVelocity;
 
+    int m_NextBackgroundIndex;
+
     void Awake()
     {
         QualitySettings.vSyncCount = 1;
 
         m_ObjectPool = new List<GameObject>();
         m_RigidbodyObjectPool = new List<GameObject>();
-        m_Lines = new List<GameObject>();
 
         m_LineMaterial = Instantiate(m_MaterialPrefab);
         m_LineMaterial.color = m_LineColor;
 
         m_MovingSquareMaterial = Instantiate(m_MaterialPrefab);
         m_MovingSquareMaterial.color = m_MovingSquareColor;
+
+        var backgroundCubeColorCount = m_BackgroundCubeColors.Length;
+        m_BackgroundCubes = new Transform[2 * backgroundCubeColorCount];
+
+        m_BackgroundMaterials = new Material[backgroundCubeColorCount];
+        for (int i = 0; i < backgroundCubeColorCount; i++)
+        {
+            var material = Instantiate(m_MaterialPrefab);
+            material.color = m_BackgroundCubeColors[i];
+            m_BackgroundMaterials[i] = material;
+        }
 
         Setup(GetCurrentResolution());
     }
@@ -76,12 +93,6 @@ public class SmoothnessTestScript : MonoBehaviour
         m_FrameIndex++;
         if (m_FrameIndex < 10)
             return;
-
-        if (m_FrameIndex > 10000) // Don't let floating point precision get out of wack.
-        {
-            Setup(currentResolution);
-            return;
-        }
 
         var perfectMovementCubePosition = m_PerfectMovementCubeTransform.position;
         var deltaTimeCubePosition = m_DeltaTimeCubeTransform.position;
@@ -98,6 +109,20 @@ public class SmoothnessTestScript : MonoBehaviour
         var deltaTimeMovement = m_CubeVelocity * Time.deltaTime;
         deltaTimeCubePosition.x += deltaTimeMovement;
         m_DeltaTimeCubeTransform.position = deltaTimeCubePosition;
+
+        var backgroundCubePosition = m_BackgroundCubes[2 * m_NextBackgroundIndex].position;
+        var backgroundPositionX = backgroundCubePosition.x;
+        if (m_CameraTransform.position.x - currentResolution.Width / 2 > backgroundPositionX)
+        {
+            backgroundCubePosition.x += currentResolution.Width;
+            m_BackgroundCubes[2 * m_NextBackgroundIndex].position = backgroundCubePosition;
+
+            backgroundCubePosition = m_BackgroundCubes[2 * m_NextBackgroundIndex + 1].position;
+            backgroundCubePosition.x += currentResolution.Width;
+            m_BackgroundCubes[2 * m_NextBackgroundIndex + 1].position = backgroundCubePosition;
+
+            m_NextBackgroundIndex = (m_NextBackgroundIndex + 1) % m_BackgroundMaterials.Length;
+        }
     }
 
     private void FixedUpdate()
@@ -122,67 +147,93 @@ public class SmoothnessTestScript : MonoBehaviour
         }
     }
 
-    private void Setup(DisplayParameters resolution)
+    private void Setup(in DisplayParameters resolution)
     {
         Cleanup();
 
         m_Resolution = resolution;
 
         m_FrameIndex = 0;
-        m_CubeWidth = resolution.Height / 48;
 
         var floatRefreshRate = (float)resolution.RefreshRate.Numerator / resolution.RefreshRate.Denominator;
+        m_CubeWidth = (int)(2.0f * resolution.Height / floatRefreshRate);
         m_CubeVelocity = floatRefreshRate * m_CubeWidth;
 
         var cubePosition = new Vector3(resolution.Width / 2 - m_CubeWidth / 2, (resolution.Height - m_CubeWidth) / 2 + 2 * m_CubeWidth, 50.0f);
         var cubeScale = new Vector3(m_CubeWidth, m_CubeWidth, 1.0f);
 
-        m_PerfectMovementCube = AllocUnitCube();
-        m_PerfectMovementCube.name = "Perfect movement cube";
-        m_PerfectMovementCubeTransform = m_PerfectMovementCube.transform;
+        var perfectMovementCube = AllocUnitCube();
+        perfectMovementCube.name = "Perfect movement cube";
+        m_PerfectMovementCubeTransform = perfectMovementCube.transform;
         SetupCube(m_PerfectMovementCubeTransform, cubePosition, cubeScale, m_MovingSquareMaterial);
 
         var lineScale = new Vector3(1.0f, resolution.Height, 1.0f);
 
-        var leftLine = AllocUnitCube();
-        leftLine.name = "Left line";
+        m_LeftLine = AllocUnitCube();
+        m_LeftLine.name = "Left line";
         Vector3 linePosition = new Vector3(cubePosition.x - 1, 0.0f, cubePosition.z + 10.0f); // Behind the cube, so that if cube intersects it, it's clearly visible
-        SetupCube(leftLine.transform, linePosition, lineScale, m_LineMaterial);
-        leftLine.transform.parent = m_PerfectMovementCubeTransform;
-        m_Lines.Add(leftLine);
+        SetupCube(m_LeftLine.transform, linePosition, lineScale, m_LineMaterial);
+        m_LeftLine.transform.parent = m_PerfectMovementCubeTransform;
 
-        var rightLine = AllocUnitCube();
-        rightLine.name = "Right line";
+        m_RightLine = AllocUnitCube();
+        m_RightLine.name = "Right line";
         linePosition.x = cubePosition.x + m_CubeWidth;
-        SetupCube(rightLine.transform, linePosition, lineScale, m_LineMaterial);
-        rightLine.transform.parent = m_PerfectMovementCubeTransform;
-        m_Lines.Add(rightLine);
+        SetupCube(m_RightLine.transform, linePosition, lineScale, m_LineMaterial);
+        m_RightLine.transform.parent = m_PerfectMovementCubeTransform;
 
-        m_DeltaTimeCube = AllocUnitCube();
-        m_DeltaTimeCube.name = "Delta time cube";
-        m_DeltaTimeCubeTransform = m_DeltaTimeCube.transform;
+        var deltaTimeCube = AllocUnitCube();
+        deltaTimeCube.name = "Delta time cube";
+        m_DeltaTimeCubeTransform = deltaTimeCube.transform;
 
         cubePosition.y = (resolution.Height - m_CubeWidth) / 2;
         SetupCube(m_DeltaTimeCubeTransform, cubePosition, cubeScale, m_MovingSquareMaterial);
 
-        m_FixedTimeCube = AllocUnitCubeWithRigidbody();
-        m_FixedTimeCube.name = "Fixed time cube";
-        m_FixedTimeCubeRigidBody = m_FixedTimeCube.GetComponent<Rigidbody>();
+        var fixedTimeCube = AllocUnitCubeWithRigidbody();
+        fixedTimeCube.name = "Fixed time cube";
+        m_FixedTimeCubeRigidBody = fixedTimeCube.GetComponent<Rigidbody>();
         m_FixedTimeCubeRigidBody.useGravity = false;
         m_FixedTimeCubeRigidBody.interpolation = RigidbodyInterpolation.Interpolate;
         m_FixedTimeCubeRigidBody.velocity = Vector3.zero;
 
         cubePosition.y = (resolution.Height - m_CubeWidth) / 2 - 2 * m_CubeWidth;
-        SetupCube(m_FixedTimeCube.transform, cubePosition, cubeScale, m_MovingSquareMaterial);
+        SetupCube(fixedTimeCube.transform, cubePosition, cubeScale, m_MovingSquareMaterial);
 
         m_Camera.orthographic = true;
         m_Camera.orthographicSize = resolution.Height / 2.0f;
         m_Camera.nearClipPlane = 1.0f;
         m_Camera.farClipPlane = 1000.0f;
 
-        var cameraTransform = m_Camera.transform;
-        cameraTransform.position = new Vector3(resolution.Width / 2.0f, resolution.Height / 2.0f, 0.0f);
-        cameraTransform.parent = m_PerfectMovementCubeTransform;
+        m_CameraTransform = m_Camera.transform;
+        m_CameraTransform.position = new Vector3(resolution.Width / 2.0f, resolution.Height / 2.0f, 0.0f);
+        m_CameraTransform.parent = m_PerfectMovementCubeTransform;
+
+        m_NextBackgroundIndex = 0;
+
+        int backgroundCubeColorCount = m_BackgroundCubeColors.Length;
+        var backgroundPositionZ = cubePosition.z + 20.0f; // Behind vertical lines
+        var backgroundCubeScale = new Vector3(m_CubeWidth / 2, m_CubeWidth / 2, 1.0f);
+
+        for (int i = 0; i < backgroundCubeColorCount; i++)
+        {
+            var backgroundMaterial = m_BackgroundMaterials[i];
+            var positionX = (i + 1) * (float)resolution.Width / backgroundCubeColorCount;
+
+            var upperCube = AllocUnitCube();
+            upperCube.name = "Background Cube";
+
+            var upperPositionY = (resolution.Height - m_CubeWidth) / 2 + 5 * m_CubeWidth / 4;
+            var upperPosition = new Vector3(positionX, upperPositionY, backgroundPositionZ);
+            var upperCubeTransform = m_BackgroundCubes[2 * i] = upperCube.transform;
+            SetupCube(upperCubeTransform, upperPosition, backgroundCubeScale, backgroundMaterial);
+
+            var lowerCube = AllocUnitCube();
+            lowerCube.name = "Background Cube";
+
+            var lowerPositionY = (resolution.Height - m_CubeWidth) / 2 - 3 * m_CubeWidth / 4;
+            var lowerPosition = new Vector3(positionX, lowerPositionY, backgroundPositionZ);
+            var lowerCubeTransform = m_BackgroundCubes[2 * i + 1] = lowerCube.transform;
+            SetupCube(lowerCubeTransform, lowerPosition, backgroundCubeScale, backgroundMaterial);
+        }
     }
 
     private static void SetupCube(Transform cubeTransform, Vector3 position, Vector3 scale, Material material)
@@ -197,31 +248,44 @@ public class SmoothnessTestScript : MonoBehaviour
 
     private void Cleanup()
     {
-        int count = m_Lines.Count;
-        for (int i = 0; i < count; i++)
-            ReleaseUnitCube(m_Lines[i]);
-
-        m_Lines.Clear();
-
-        if (m_PerfectMovementCube)
+        if (m_LeftLine)
         {
-            ReleaseUnitCube(m_PerfectMovementCube);
-            m_PerfectMovementCube = null;
+            ReleaseUnitCube(m_LeftLine);
+            m_LeftLine = null;
+        }
+
+        if (m_RightLine)
+        {
+            ReleaseUnitCube(m_RightLine);
+            m_RightLine = null;
+        }
+
+        if (m_PerfectMovementCubeTransform)
+        {
+            ReleaseUnitCube(m_PerfectMovementCubeTransform.gameObject);
             m_PerfectMovementCubeTransform = null;
         }
 
-        if (m_DeltaTimeCube)
+        if (m_DeltaTimeCubeTransform)
         {
-            ReleaseUnitCube(m_DeltaTimeCube);
-            m_DeltaTimeCube = null;
+            ReleaseUnitCube(m_DeltaTimeCubeTransform.gameObject);
             m_DeltaTimeCubeTransform = null;
         }
 
-        if (m_FixedTimeCube)
+        if (m_FixedTimeCubeRigidBody)
         {
-            ReleaseUnitCubeWithRigidBody(m_FixedTimeCube);
-            m_FixedTimeCube = null;
+            ReleaseUnitCubeWithRigidBody(m_FixedTimeCubeRigidBody.gameObject);
             m_FixedTimeCubeRigidBody = null;
+        }
+
+        var backgroundCubeCount = m_BackgroundCubes.Length;
+        for (int i = 0; i < backgroundCubeCount; i++)
+        {
+            if (m_BackgroundCubes[i])
+            {
+                ReleaseUnitCube(m_BackgroundCubes[i].gameObject);
+                m_BackgroundCubes[i] = null;
+            }
         }
     }
 
@@ -236,7 +300,7 @@ public class SmoothnessTestScript : MonoBehaviour
         result.SetActive(true);
         return result;
     }
-    
+
     GameObject AllocUnitCubeWithRigidbody()
     {
         if (m_RigidbodyObjectPool.Count == 0)
