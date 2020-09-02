@@ -156,7 +156,7 @@ public class SmoothnessTestScript : MonoBehaviour
         m_FrameIndex = 0;
 
         var floatRefreshRate = (float)resolution.RefreshRate.Numerator / resolution.RefreshRate.Denominator;
-        m_CubeWidth = (int)(2.0f * resolution.Height / floatRefreshRate);
+        m_CubeWidth = (int)(2.0f * resolution.Width / floatRefreshRate);
         m_CubeVelocity = floatRefreshRate * m_CubeWidth;
 
         var cubePosition = new Vector3(resolution.Width / 2 - m_CubeWidth / 2, (resolution.Height - m_CubeWidth) / 2 + 2 * m_CubeWidth, 50.0f);
